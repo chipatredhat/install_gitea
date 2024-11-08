@@ -18,7 +18,7 @@
     GITEAUSER: rhel9
     GITEAUSERPASS: redhat
     GITEAUSEREMAIL: lab-user@example.com
-    HOSTNAME: imtest
+    HOSTNAME: gitea
     DOMAINNAME: example.com
     HTTPPORT: 3000
 
