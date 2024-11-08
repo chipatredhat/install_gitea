@@ -73,8 +73,8 @@
           GITEA__database__PASSWD={{ DBPASS }}
           GITEA__server__PROTOCOL=https
           GITEA__server__ROOT_URL={{ HOSTNAME }}.{{ DOMAINNAME }}:{{ HTTPPORT }}
-          GITEA__server__CERT_FILE=/data/gitea/conf/certs/wildcard.example.com.crt
-          GITEA__server__KEY_FILE=/data/gitea/conf/certs/wildcard.example.com.key
+          GITEA__server__CERT_FILE=/data/gitea/conf/{{ HOSTNAME }}.{{ DOMAINNAME }}.crt
+          GITEA__server__KEY_FILE=/data/gitea/conf/{{ HOSTNAME }}.{{ DOMAINNAME }}.key
           GITEA__security__MIN_PASSWORD_LENGTH=6
       volume:
         - "{{ INSTALL_DIR }}/mariadb:/var/lib/mysql:Z"
@@ -83,10 +83,16 @@
     become: true
     become_user: "{{ USERNAME }}"
       
-  - name: Copy certs
+  - name: Copy crt
     containers.podman.podman_container_copy:
-      src: /tmp/certs
-      dest: /data/gitea/conf/
+      src: files/crt
+      dest: /data/gitea/conf/{{ HOSTNAME }}.{{ DOMAINNAME }}.crt
+      container: "{{ GITEANAME }}"
+
+  - name: Copy key
+    containers.podman.podman_container_copy:
+      src: files/key
+      dest: /data/gitea/conf/{{ HOSTNAME }}.{{ DOMAINNAME }}.key
       container: "{{ GITEANAME }}"
 
   - name: Restart the container to pickup the certs
