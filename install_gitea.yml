@@ -1,0 +1,111 @@
+---
+- name: Install gitea
+  hosts: localhost
+  become: no
+  gather_facts: no
+  connection: local
+  
+  vars:
+    USERNAME: lab-user
+    INSTALL_DIR: /home/{{ USERNAME }}/gitea
+    PODNAME: gitea_pod
+    DBCONTAINER: gitea_db
+    DBROOTPASS: gitea
+    DBUSER: gitea
+    DBPASS: gitea
+    DB: gitea
+    GITEANAME: gitea
+    GITEAUSER: rhel9
+    GITEAUSERPASS: redhat
+    GITEAUSEREMAIL: lab-user@example.com
+    HOSTNAME: imtest
+    DOMAINNAME: example.com
+    HTTPPORT: 3000
+
+  tasks:
+
+  - name: Make the directory structure
+    ansible.builtin.file:
+      state: directory
+      path: "{{ item }}"
+    with_items:
+      - "{{ INSTALL_DIR }}/mariadb"
+      - "{{ INSTALL_DIR }}/data/gitea/conf"
+    become: true
+    become_user: "{{ USERNAME }}"
+
+  - name: Create the pod
+    containers.podman.podman_pod:
+      name: "{{ PODNAME }}"
+      state: started
+      ports:
+      - "3000:3000"
+    become: true
+    become_user: "{{ USERNAME }}"
+    
+  - name: Create a mariadb container
+    containers.podman.podman_container:
+      pod: "{{ PODNAME }}"
+      name: "{{ DBCONTAINER }}"
+      image: docker.io/mariadb:latest
+      state: started
+      env:
+          MYSQL_ROOT_PASSWORD={{ DBROOTPASS }}
+          MYSQL_USER={{ DBUSER }}
+          MYSQL_PASSWORD={{ DBPASS }}
+          MYSQL_DATABASE={{ DB }}
+      volume:
+        - "{{ INSTALL_DIR }}/mariadb:/var/lib/mysql:Z"
+    become: true
+    become_user: "{{ USERNAME }}"
+    
+  - name: Create gitea container
+    containers.podman.podman_container:
+      pod: "{{ PODNAME }}"
+      name: "{{ GITEANAME }}"
+      image: docker.io/gitea/gitea:latest
+      state: started
+      env:
+          GITEA__database__DB_TYPE=mysql
+          GITEA__database__HOST=localhost:3306
+          GITEA__database__NAME={{ DB }}
+          GITEA__database__USER={{ DBUSER }}
+          GITEA__database__PASSWD={{ DBPASS }}
+          GITEA__server__PROTOCOL=https
+          GITEA__server__ROOT_URL={{ HOSTNAME }}.{{ DOMAINNAME }}:{{ HTTPPORT }}
+          GITEA__server__CERT_FILE=/data/gitea/conf/certs/wildcard.example.com.crt
+          GITEA__server__KEY_FILE=/data/gitea/conf/certs/wildcard.example.com.key
+          GITEA__security__MIN_PASSWORD_LENGTH=6
+      volume:
+        - "{{ INSTALL_DIR }}/mariadb:/var/lib/mysql:Z"
+        - "{{ INSTALL_DIR }}/data:/data:Z"
+        - /etc/localtime:/etc/localtime:ro
+    become: true
+    become_user: "{{ USERNAME }}"
+      
+  - name: Copy certs
+    containers.podman.podman_container_copy:
+      src: /tmp/certs
+      dest: /data/gitea/conf/
+      container: "{{ GITEANAME }}"
+
+  - name: Restart the container to pickup the certs
+    containers.podman.podman_container:
+      name: "{{ GITEANAME }}"
+      force_restart: true
+
+  - name: Wait one minute to ensure gitea is ready to configure
+    pause:
+      seconds: 60
+
+  - name: Configure gitea
+    ansible.builtin.command: curl --silent --verbose --data-binary 'db_type=mysql&db_host=localhost%3A3306&db_user={{ DBUSER }}&db_passwd={{ DBPASS }}&db_name={{ DB }}&ssl_mode=disable&db_schema=&db_path=%2Fdata%2Fgitea%2Fgitea.db&app_name=Gitea%3A+Git+with+a+cup+of+tea&repo_root_path=%2Fdata%2Fgit%2Frepositories&lfs_root_path=%2Fdata%2Fgit%2Flfs&run_user=git&domain={{ HOSTNAME }}&ssh_port=22&http_port=3000&app_url=http%3A%2F%2F{{ HOSTNAME }}.{{ DOMAINNAME }}%3A{{ HTTPPORT }}%2F&log_root_path=%2Fdata%2Fgitea%2Flog&smtp_addr=&smtp_port=&smtp_from=&smtp_user=&smtp_passwd=&offline_mode=on&disable_gravatar=on&enable_open_id_sign_in=on&enable_open_id_sign_up=on&default_allow_create_organization=on&default_enable_timetracking=on&no_reply_address=noreply.localhost&password_algorithm=pbkdf2&admin_name=&admin_email=&admin_passwd=&admin_confirm_passwd=' https://{{ HOSTNAME }}.{{ DOMAINNAME }}:{{ HTTPPORT }}/ > /dev/null
+    become: true
+    become_user: "{{ USERNAME }}"
+    ignore_errors: true
+
+  - name: Create a user and set the password
+    ansible.builtin.command: podman exec -u git {{ GITEANAME }} gitea admin user create --username {{ GITEAUSER }} --password {{ GITEAUSERPASS }} --email {{ GITEAUSEREMAIL }} --must-change-password=false
+    become: true
+    become_user: "{{ USERNAME }}"
+    ignore_errors: true
